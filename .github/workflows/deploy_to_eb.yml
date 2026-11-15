@@ -1,0 +1,78 @@
+name: Deploy Moodle to AWS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  validate:
+    name: Validate Scripts & config.php
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce MOODLE_502_STABLE Branch
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/MOODLE_502_STABLE" ]; then
+            echo "Error: Deployments are restricted to MOODLE_502_STABLE (triggered from ${{ github.ref }})."
+            exit 1
+          fi
+
+      - name: Checkout Code
+        uses: actions/checkout@v5
+        with:
+          ref: MOODLE_502_STABLE
+
+      # 1. Setup PHP 8.3
+      - name: Setup PHP Environment
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+
+      # 2. Lint config.php Syntax
+      - name: Lint config.php
+        run: |
+          if [ -f "config.php" ]; then
+            echo "Validating config.php syntax..."
+            php -l config.php
+          else
+            echo "Notice: config.php not found in repository root, skipping."
+          fi
+
+      # 3. Lint Shell Scripts (.platform/hooks/**/*.sh)
+      - name: Run ShellCheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: '.platform/hooks'
+
+      # 4. Lint YAML & .ebextensions Configs
+      - name: Lint .ebextensions Configs
+        run: |
+          sudo apt-get update && sudo apt-get install -y yamllint
+          yamllint -d "{extends: relaxed, rules: {line-length: disable}}" .ebextensions/
+
+  deploy:
+    name: Deploy to Elastic Beanstalk
+    needs: validate # Fails fast: only deploys if validate job passes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v5
+        with:
+          ref: MOODLE_502_STABLE
+
+      - name: Zip Moodle Code
+        run: zip -r -qdgds 10m moodle-deployment.zip . -x "*.git*" ".github/*"
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v5
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ap-southeast-2
+
+      - name: Deploy to Elastic Beanstalk
+        uses: aws-actions/aws-elasticbeanstalk-deploy@v1
+        with:
+          aws-region: ap-southeast-2
+          application-name: MaruMoodleLMS
+          environment-name: MaruMoodle-Prod-v2
+          version-label: ${{ github.sha }}-${{ github.run_number }}-${{ github.run_attempt }}
+          deployment-package-path: moodle-deployment.zip
