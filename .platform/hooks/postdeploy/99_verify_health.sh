@@ -7,8 +7,14 @@ log_info()  { echo "[INFO] [$LOG_TAG] $1"; }
 log_error() { echo "[ERROR] [$LOG_TAG] $1" >&2; }
 
 # ==============================================================================
-# GET ENDPOINTS
+# 1. GET ENDPOINTS
 # ==============================================================================
+if [ -x /opt/elasticbeanstalk/bin/get-config ]; then
+    EB_DB_HOST=$(/opt/elasticbeanstalk/bin/get-config environment -k MOODLE_DB_HOST 2>/dev/null || true)
+    EB_REDIS_HOST=$(/opt/elasticbeanstalk/bin/get-config environment -k MOODLE_REDIS_HOST 2>/dev/null || true)
+    DB_HOST="${DB_HOST:-${EB_DB_HOST}}"
+    REDIS_HOST="${REDIS_HOST:-${EB_REDIS_HOST}}"
+fi
 
 DB_HOST="${DB_HOST:-maru-moodle-db.cluster-crkc8w28olh1.ap-southeast-2.rds.amazonaws.com}"
 REDIS_HOST="${REDIS_HOST:-master.marumoodle-redis-tls.trutt8.apse2.cache.amazonaws.com}"
@@ -64,12 +70,17 @@ for SERVICE in nginx php-fpm; do
     fi
 done
 
-# Validate Nginx configuration syntax
+# Verify Nginx PID file is non-empty and points to a live process
+NGINX_PID=$(tr -d '[:space:]' < /run/nginx.pid 2>/dev/null || true)
+if [[ ! "$NGINX_PID" =~ ^[0-9]+$ ]] || ! kill -0 "$NGINX_PID" 2>/dev/null; then
+    log_error "Nginx PID file (/run/nginx.pid) is empty or stale. Restarting nginx..."
+    rm -f /run/nginx.pid
+    systemctl restart nginx || { log_error "Failed to restart nginx"; exit 1; }
+fi
+
+# Validate Nginx configuration syntax (reload is handled by 01_reload_nginx.sh)
 log_info "Validating Nginx syntax..."
 nginx -t || { log_error "Nginx configuration syntax failure!"; exit 1; }
-
-# Reload Nginx to ensure active certificates and rules are applied
-systemctl reload nginx
 
 # Test Local HTTPS Endpoint (Port 443)
 log_info "Testing local HTTPS listener (https://127.0.0.1/)..."
