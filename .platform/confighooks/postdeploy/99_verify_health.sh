@@ -1,0 +1,1 @@
+../../hooks/postdeploy/99_verify_health.sh

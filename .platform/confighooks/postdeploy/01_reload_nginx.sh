@@ -1,0 +1,1 @@
+../../hooks/postdeploy/01_reload_nginx.sh

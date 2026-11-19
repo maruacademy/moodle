@@ -1,0 +1,1 @@
+../../hooks/predeploy/01_ssl_cert.sh
