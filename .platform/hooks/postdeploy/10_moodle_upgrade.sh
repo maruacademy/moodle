@@ -44,13 +44,13 @@ trap cleanup EXIT
 
 cd "$APP_DIR"
 
-# --is-pending exits 0 when an upgrade is needed and 1 when already up to date
+# Moodle's upgrade.php --is-pending exits 2 when an upgrade is pending and 0 when up to date
 set +e
 PENDING_OUTPUT=$(run_as_webapp php admin/cli/upgrade.php --is-pending 2>&1)
 PENDING_RC=$?
 set -e
 
-if [ "$PENDING_RC" -eq 0 ]; then
+if [ "$PENDING_RC" -eq 2 ] || [[ "$PENDING_OUTPUT" == *"An upgrade is pending"* ]]; then
   echo "Pending Moodle upgrade detected. Enabling maintenance mode..."
   run_as_webapp php admin/cli/maintenance.php --enable
   MAINTENANCE_ACTIVE=1
@@ -62,11 +62,10 @@ if [ "$PENDING_RC" -eq 0 ]; then
   run_as_webapp php admin/cli/purge_caches.php
 
   echo "Moodle CLI upgrade completed successfully."
-elif [[ "$PENDING_OUTPUT" == *"No upgrade needed"* ]]; then
+elif [ "$PENDING_RC" -eq 0 ] || [[ "$PENDING_OUTPUT" == *"No upgrade needed"* ]]; then
   echo "No pending Moodle upgrade detected. Skipping."
 else
   echo "Error checking pending Moodle upgrades (exit code $PENDING_RC):" >&2
   echo "$PENDING_OUTPUT" >&2
   exit 1
 fi
-
